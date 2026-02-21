@@ -1,0 +1,20 @@
+{
+  "name": "Antigravity",
+  "image": "antigravity:latest",
+  "workspaceFolder": "/workspaces/CANSecKod_CANXL",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/CANSecKod_CANXL,type=bind",
+  "remoteUser": "root",
+  "init": true,
+  "overrideCommand": true,
+  "remoteEnv": {
+    "VSCODE_AGENT_FOLDER": "/tmp/.antigravity-server"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools"
+      ]
+    }
+  }
+}

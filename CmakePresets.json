@@ -1,0 +1,31 @@
+{
+  "version": 5,
+  "configurePresets": [
+    {
+      "name": "vscode",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "vscode-tmp",
+      "generator": "Ninja",
+      "binaryDir": "/tmp/vscode-build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "vscode",
+      "configurePreset": "vscode"
+    },
+    {
+      "name": "vscode-tmp",
+      "configurePreset": "vscode-tmp"
+    }
+  ]
+}
