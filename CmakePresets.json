@@ -6,7 +6,8 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "/Users/furkanozen/Documents/Libraries/CANSec"
       }
     },
     {
@@ -14,7 +15,8 @@
       "generator": "Ninja",
       "binaryDir": "/tmp/vscode-build",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "/Users/furkanozen/Documents/Libraries/CANSec"
       }
     }
   ],

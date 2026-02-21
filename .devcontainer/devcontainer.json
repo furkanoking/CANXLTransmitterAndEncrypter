@@ -3,6 +3,9 @@
   "image": "antigravity:latest",
   "workspaceFolder": "/workspaces/CANSecKod_CANXL",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/CANSecKod_CANXL,type=bind",
+  "mounts": [
+    "source=/Users/furkanozen/Documents/Libraries,target=/host_libraries,type=bind"
+  ],
   "remoteUser": "root",
   "init": true,
   "overrideCommand": true,
