@@ -8,18 +8,51 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Default install location: ~/Documents/Libraries/CANSec
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "/Users/furkanozen/Documents/Libraries/CANSec" CACHE PATH "Install path" FORCE)
+# Default install location:
+# - inside the devcontainer, use the host-mounted libraries path
+# - locally, use ~/Documents/Libraries/CANSec
+if(EXISTS "/host_libraries")
+    set(_cansec_default_install_prefix "/host_libraries/CANSec")
+elseif(DEFINED ENV{HOME} AND NOT "$ENV{HOME}" STREQUAL "")
+    set(_cansec_default_install_prefix "$ENV{HOME}/Documents/Libraries/CANSec")
+else()
+    set(_cansec_default_install_prefix "${CMAKE_CURRENT_SOURCE_DIR}/_install")
 endif()
+
+if(DEFINED ENV{CANSEC_INSTALL_PREFIX} AND NOT "$ENV{CANSEC_INSTALL_PREFIX}" STREQUAL "")
+    set(_cansec_install_prefix "$ENV{CANSEC_INSTALL_PREFIX}")
+elseif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OR
+       CMAKE_INSTALL_PREFIX STREQUAL "/usr/local" OR
+       CMAKE_INSTALL_PREFIX STREQUAL "")
+    set(_cansec_install_prefix "${_cansec_default_install_prefix}")
+endif()
+
+if(DEFINED _cansec_install_prefix)
+    set(CMAKE_INSTALL_PREFIX "${_cansec_install_prefix}" CACHE PATH "Install path" FORCE)
+    unset(_cansec_install_prefix)
+endif()
+unset(_cansec_default_install_prefix)
 
 option(CANSEC_BUILD_EXAMPLES "Build sender/receiver example apps" ON)
 
-add_library(CANSecKit STATIC
+set(_cansec_sources
     CANSec.cpp
+)
+
+set(_cansec_can_sources
     CANFDStructure/CANFD.cpp
     CANXLStructure/CANXL.cpp
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND _cansec_sources ${_cansec_can_sources})
+else()
+    message(STATUS "Building portable CANSecKit without SocketCAN sources on ${CMAKE_SYSTEM_NAME}")
+endif()
+
+add_library(CANSecKit STATIC ${_cansec_sources})
+unset(_cansec_can_sources)
+unset(_cansec_sources)
 add_library(CANSec::Kit ALIAS CANSecKit)
 
 # Backward-compatible alias name for existing consumers
@@ -30,7 +63,6 @@ target_include_directories(CANSecKit
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/CANFDStructure>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/CANXLStructure>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third-party-library/canbus-common/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/CANSec>
 )
 
@@ -44,17 +76,7 @@ target_link_libraries(CANSecKit
         Threads::Threads
 )
 
-set(CANBUS_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third-party-library/canbus-common")
-if(EXISTS "${CANBUS_COMMON_DIR}/libcanbus_common.so")
-    add_library(canbus-common SHARED IMPORTED)
-    set_target_properties(canbus-common PROPERTIES
-        IMPORTED_LOCATION "${CANBUS_COMMON_DIR}/libcanbus_common.so"
-        INTERFACE_INCLUDE_DIRECTORIES "${CANBUS_COMMON_DIR}"
-    )
-    target_link_libraries(CANSecKit PUBLIC canbus-common)
-endif()
-
-if(CANSEC_BUILD_EXAMPLES)
+if(CANSEC_BUILD_EXAMPLES AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(canxl_sender tests/CANXL.sender.cpp)
     target_link_libraries(canxl_sender PRIVATE CANSecKit Threads::Threads)
 
@@ -87,12 +109,6 @@ install(DIRECTORY
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/CANSec/CANXLStructure
     FILES_MATCHING PATTERN "*.h"
 )
-
-if(EXISTS "${CANBUS_COMMON_DIR}/libcanbus_common.so")
-    install(FILES "${CANBUS_COMMON_DIR}/libcanbus_common.so"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    )
-endif()
 
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/CANSecKitConfigVersion.cmake"
