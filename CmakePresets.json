@@ -6,8 +6,21 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_INSTALL_PREFIX": "/Users/furkanozen/Documents/Libraries/CANSec"
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "vscode-host",
+      "inherits": "vscode",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "$env{HOME}/Documents/Libraries/CANSec"
+      }
+    },
+    {
+      "name": "vscode-container",
+      "inherits": "vscode",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "/host_libraries/CANSec"
       }
     },
     {
@@ -16,7 +29,7 @@
       "binaryDir": "/tmp/vscode-build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_INSTALL_PREFIX": "/Users/furkanozen/Documents/Libraries/CANSec"
+        "CMAKE_INSTALL_PREFIX": "/host_libraries/CANSec"
       }
     }
   ],
@@ -24,6 +37,14 @@
     {
       "name": "vscode",
       "configurePreset": "vscode"
+    },
+    {
+      "name": "vscode-host",
+      "configurePreset": "vscode-host"
+    },
+    {
+      "name": "vscode-container",
+      "configurePreset": "vscode-container"
     },
     {
       "name": "vscode-tmp",
