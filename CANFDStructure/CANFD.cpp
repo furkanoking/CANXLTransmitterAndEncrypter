@@ -26,7 +26,7 @@ std::uint64_t timespecToNanoseconds(const timespec& value) {
            static_cast<std::uint64_t>(value.tv_nsec);
 }
 
-std::uint64_t getRealtimeNanosecondsFallback() { // Fallback method to get current time in nanoseconds if kernel timestamp is not available
+std::uint64_t getRealtimeNanosecondsFallback() { // If kernel timestamp is not available, we can use this function to get the current time in nanoseconds
     timespec now{};
     clock_gettime(CLOCK_REALTIME, &now);
     return timespecToNanoseconds(now);
