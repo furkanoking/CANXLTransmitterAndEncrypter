@@ -8,6 +8,7 @@
 #include <queue>
 #include <mutex>
 #include <atomic>
+#include <cstdint>
 #include <vector>
 #include "Tipler.h"
 
@@ -104,8 +105,13 @@ public:
      * @brief Increment the counter of the message
      */
     void IncrementCounter();
+    std::optional<std::uint64_t> getLastTransmitTimeNanoseconds() const;
+    std::optional<std::uint64_t> getLastReceiveTimeNanoseconds() const;
+    void startClockLogger(const std::string& label = "CANFD_CLOCK");
+    void stopClockLogger();
     
 private:
+    void clockLoggerLoop(std::stop_token stopToken, std::string label);
     /**
      * Map to store socket ID associated with their names
      */
@@ -142,6 +148,9 @@ private:
      * Mutex to protect the counter of the message from concurrent access
      */
     std::mutex m_mutexCounter{};
+    std::atomic<std::uint64_t> m_lastTransmitTimeNanoseconds{0};
+    std::atomic<std::uint64_t> m_lastReceiveTimeNanoseconds{0};
+    std::jthread m_clockLoggerThread{};
 
     /**
      * Counter to store the number of messages received

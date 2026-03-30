@@ -4,12 +4,68 @@
 #include <cstring>
 #include <iostream>
 #include <linux/can.h>
+#include <linux/errqueue.h>
+#include <linux/net_tstamp.h>
 #include <sys/ioctl.h>
 #include <linux/can/raw.h>
+#include <unistd.h>
+#include <time.h>
+#include <array>
+#include <cerrno>
+#include <chrono>
+#include <cstdint>
 
 #include "GlobalThreads.h"
 #include "Tipler.h"
 #include "CANSec.h"
+#include "TimestampUtils.h"
+
+namespace {
+std::uint64_t timespecToNanoseconds(const timespec& value) {
+    return (static_cast<std::uint64_t>(value.tv_sec) * 1'000'000'000ULL) +
+           static_cast<std::uint64_t>(value.tv_nsec);
+}
+
+std::uint64_t getRealtimeNanosecondsFallback() { // Fallback method to get current time in nanoseconds if kernel timestamp is not available
+    timespec now{};
+    clock_gettime(CLOCK_REALTIME, &now);
+    return timespecToNanoseconds(now);
+}
+
+std::optional<std::uint64_t> extractTimestampNanoseconds(msghdr& msg) {
+    for (cmsghdr* control = CMSG_FIRSTHDR(&msg); control != nullptr; control = CMSG_NXTHDR(&msg, control)) {
+        if (control->cmsg_level != SOL_SOCKET || control->cmsg_type != SCM_TIMESTAMPING) {
+            continue;
+        }
+
+        auto* timestamps = reinterpret_cast<scm_timestamping*>(CMSG_DATA(control));
+        for (const timespec& candidate : timestamps->ts) {
+            if (candidate.tv_sec != 0 || candidate.tv_nsec != 0) {
+                return timespecToNanoseconds(candidate);
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
+void enableSocketTimestamping(int socketFd) {
+    const int flags = SOF_TIMESTAMPING_SOFTWARE |
+                      SOF_TIMESTAMPING_RX_SOFTWARE |
+                      SOF_TIMESTAMPING_TX_SOFTWARE;
+
+    if (setsockopt(socketFd, SOL_SOCKET, SO_TIMESTAMPING, &flags, sizeof(flags)) < 0) {
+        std::cerr << "Warning: failed to enable SO_TIMESTAMPING: errno=" << errno
+                  << " (" << std::strerror(errno) << ")" << std::endl;
+    }
+}
+
+void logNamedTimestamp(const char* label, std::uint64_t timestampNanoseconds) {
+    std::cout << '[' << label << "] ns=" << timestampNanoseconds
+              << " formatted=" << formatTimestampNanoseconds(timestampNanoseconds)
+              << std::endl;
+}
+} // namespace
 
 CANFD::~CANFD() {
     if (m_threadReceive.joinable()) {
@@ -92,6 +148,8 @@ bool CANFD::CreateSocket(const std::string &socketname) {
             return false;
         }
 
+        enableSocketTimestamping(sock);
+
         std::scoped_lock<std::mutex> lock(m_mutexSocketMap);
         std::cout<<"Socket created successfully: "<<socketname<<std::endl;
         std::cout<<"Socket ID:"<<sock<<std::endl;
@@ -122,11 +180,32 @@ void CANFD::ThreadReceiveMessage(const std::string &socketname, std::function<vo
         }
     }
 
-    canfd_frame the_listening_frame{};
     CANFDStruct the_CANFD{};
 
     while (true) {
-        if (int nybets_read = read(socket_value, &the_listening_frame, sizeof(canfd_frame)); nybets_read > 0) {
+        canfd_frame the_listening_frame{};
+        std::array<char, CMSG_SPACE(sizeof(scm_timestamping))> control_buffer{};
+        iovec io_vector{};
+        io_vector.iov_base = &the_listening_frame;
+        io_vector.iov_len = sizeof(the_listening_frame);
+
+        msghdr message{};
+        message.msg_iov = &io_vector;
+        message.msg_iovlen = 1;
+        message.msg_control = control_buffer.data();
+        message.msg_controllen = control_buffer.size();
+
+        if (int nybets_read = recvmsg(socket_value, &message, 0); nybets_read > 0) {
+            if (const auto timestamp = extractTimestampNanoseconds(message); timestamp.has_value()) {
+                m_lastReceiveTimeNanoseconds.store(*timestamp, std::memory_order_relaxed);
+                logNamedTimestamp("R_x", *timestamp);
+            } else {
+                const std::uint64_t fallbackTimestamp = getRealtimeNanosecondsFallback();
+                std::cerr << "[CANFD][RX] kernel timestamp missing, falling back to CLOCK_REALTIME" << std::endl;
+                m_lastReceiveTimeNanoseconds.store(fallbackTimestamp, std::memory_order_relaxed);
+                logNamedTimestamp("R_x", fallbackTimestamp);
+            }
+
             if (the_listening_frame.can_id != m_iID) {
                 std::cout<<"Receiving message is not suitable ID. It will be not read"<<std::endl;
                 continue;
@@ -173,6 +252,9 @@ void CANFD::ThreadReceiveMessage(const std::string &socketname, std::function<vo
 
             // Add received data to queue with mutex protection (for later retrieval if needed)
             setReceievedData(the_CANFD);
+        } else if (nybets_read < 0 && errno != EINTR) {
+            std::cerr << "[CANFD][RX] recvmsg failed: errno=" << errno
+                      << " (" << std::strerror(errno) << ")" << std::endl;
         }
     }
 }
@@ -221,6 +303,31 @@ void CANFD::ThreadSendMessage(const std::string &socketname, const int ID, const
         std::cerr << "Error sending message" << std::endl;
         return;
     }
+
+    std::array<char, CMSG_SPACE(sizeof(scm_timestamping))> control_buffer{};
+    std::array<char, 1> payload_buffer{};
+    iovec io_vector{};
+    io_vector.iov_base = payload_buffer.data();
+    io_vector.iov_len = payload_buffer.size();
+
+    msghdr message{};
+    message.msg_iov = &io_vector;
+    message.msg_iovlen = 1;
+    message.msg_control = control_buffer.data();
+    message.msg_controllen = control_buffer.size();
+
+    if (recvmsg(socket_value, &message, MSG_ERRQUEUE | MSG_DONTWAIT) >= 0) {
+        if (const auto timestamp = extractTimestampNanoseconds(message); timestamp.has_value()) {
+            m_lastTransmitTimeNanoseconds.store(*timestamp, std::memory_order_relaxed);
+            logNamedTimestamp("T_x", *timestamp);
+            return;
+        }
+    }
+
+    const std::uint64_t fallbackTimestamp = getRealtimeNanosecondsFallback();
+    std::cerr << "[CANFD][TX] kernel TX timestamp unavailable, falling back to CLOCK_REALTIME" << std::endl;
+    m_lastTransmitTimeNanoseconds.store(fallbackTimestamp, std::memory_order_relaxed);
+    logNamedTimestamp("T_x", fallbackTimestamp);
 }
 
 void CANFD::setID(const int& ID) {
@@ -274,4 +381,49 @@ int CANFD::getCounter() {
 void CANFD::IncrementCounter() {
     std::scoped_lock<std::mutex> lock(m_mutexCounter);
     ++counter_message;
+}
+
+std::optional<std::uint64_t> CANFD::getLastTransmitTimeNanoseconds() const {
+    const std::uint64_t timestamp = m_lastTransmitTimeNanoseconds.load(std::memory_order_relaxed);
+    if (timestamp == 0) {
+        return std::nullopt;
+    }
+
+    return timestamp;
+}
+
+std::optional<std::uint64_t> CANFD::getLastReceiveTimeNanoseconds() const {
+    const std::uint64_t timestamp = m_lastReceiveTimeNanoseconds.load(std::memory_order_relaxed);
+    if (timestamp == 0) {
+        return std::nullopt;
+    }
+
+    return timestamp;
+}
+
+void CANFD::startClockLogger(const std::string& label) {
+    stopClockLogger();
+    m_clockLoggerThread = std::jthread([this, label](std::stop_token stopToken) {
+        clockLoggerLoop(stopToken, label);
+    });
+}
+
+void CANFD::stopClockLogger() {
+    if (m_clockLoggerThread.joinable()) {
+        m_clockLoggerThread.request_stop();
+        m_clockLoggerThread.join();
+    }
+}
+
+void CANFD::clockLoggerLoop(std::stop_token stopToken, std::string label) {
+    while (!stopToken.stop_requested()) {
+        const std::uint64_t nowNanoseconds = getCurrentRealtimeNanoseconds();
+        std::cout << '[' << label << "] now_ns=" << nowNanoseconds
+                  << " formatted=" << formatTimestampNanoseconds(nowNanoseconds)
+                  << std::endl;
+
+        for (int i = 0; i < 50 && !stopToken.stop_requested(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
 }
