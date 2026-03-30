@@ -37,6 +37,7 @@ option(CANSEC_BUILD_EXAMPLES "Build sender/receiver example apps" ON)
 
 set(_cansec_sources
     CANSec.cpp
+    TimestampUtils.cpp
 )
 
 set(_cansec_can_sources
@@ -82,6 +83,12 @@ if(CANSEC_BUILD_EXAMPLES AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_executable(canxl_receiver tests/CANXL_receiver.cpp)
     target_link_libraries(canxl_receiver PRIVATE CANSecKit Threads::Threads)
+
+    add_executable(canxl_timestamp_sender tests/CANXL_timestamp_sender.cpp)
+    target_link_libraries(canxl_timestamp_sender PRIVATE CANSecKit Threads::Threads)
+
+    add_executable(canxl_timestamp_receiver tests/CANXL_timestamp_receiver.cpp)
+    target_link_libraries(canxl_timestamp_receiver PRIVATE CANSecKit Threads::Threads)
 endif()
 
 install(TARGETS CANSecKit
@@ -95,6 +102,7 @@ install(TARGETS CANSecKit
 # Install all public headers (preserve folders to avoid filename collisions)
 install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/CANSec.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/TimestampUtils.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/CANSec
 )
 
